@@ -71,20 +71,21 @@ torch.manual_seed(2024)
 
 def load_all_graphs(folder_path):
     # Get a list of all .pt files in the folder
-    file_paths = [os.path.join(folder_path, file) for file in os.listdir(folder_path) if file.endswith('.pt')]
+    file_paths = [os.path.join(folder_path, file) for file in os.listdir(folder_path) if file.endswith('.pth')]
 
     # Load all the graphs from the files
     all_graphs = []
     for file_path in file_paths:
-        all_graphs.extend(torch.load(file_path))
+        graph_dict = torch.load(file_path)
+        all_graphs.append(graph_dict)
 
     return all_graphs
 
-all_graphs = load_all_graphs('./torch_processed/noxyz_graph_representation/')
+all_graphs = load_all_graphs('./data/torch_processed/')
 
 # Assuming all_graphs is a list of Data objects
 for graph in all_graphs:
-    graph.y = torch.tensor([graph['Delta Gsolv[III-II], eV']])  # Set 'Delta Gsolv[III-II], eV' as the target and convert it to a tensor
+    graph.y = torch.tensor([graph['HS_E_red']])  # Set HS_E_red as the target and convert it to a tensor
 
 # Define the number of features for the nodes
 num_node_features = 4
