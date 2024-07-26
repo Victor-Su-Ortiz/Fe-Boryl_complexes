@@ -1,7 +1,6 @@
 import os
 import torch
 import csv
-from torch_geometric.nn import GATConv
 from torch_geometric.loader import DataLoader
 import torch.optim as optim
 from torch.utils.data.dataset import random_split
