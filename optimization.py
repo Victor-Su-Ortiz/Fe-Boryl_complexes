@@ -56,6 +56,6 @@ search = CBO(
     evaluator,
 )
 
-results = search.search(max_evals=2000)
+results = search.search(max_evals=25)
 
 print(results)

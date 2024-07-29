@@ -37,7 +37,7 @@ class GCNNet_mse(torch.nn.Module):
         self.dense = torch.nn.Linear(hidden_dims[-1], hidden_dims[-1])
 
         # Define the output layer
-        self.fc_mu = torch.nn.Linear(hidden_dims[-1], 1)
+        self.fc_mu = torch.nn.Linear(hidden_dims[-1], 2)
 
     def forward(self, data):
         x, edge_index = data.x, data.edge_index
@@ -85,12 +85,10 @@ all_graphs = load_all_graphs('./data/torch_processed/')
 
 # Assuming all_graphs is a list of Data objects
 for graph in all_graphs:
-    graph.y = torch.tensor([graph['HS_E_red']])  # Set HS_E_red as the target and convert it to a tensor
+    graph.y = torch.tensor([graph['HS_E_red'], graph['LS_E_red']])
 
 # Define the number of features for the nodes
 num_node_features = 4
-
-
 
 def run_gcn_mse(hp):
     # Create a DataLoader from all_graphs

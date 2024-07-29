@@ -1,5 +1,5 @@
 calls:
-- max_evals: 2000
+- max_evals: 25
   timeout: null
 search:
   acq_func: UCBd
