@@ -36,7 +36,7 @@ class GCNNet_mse(torch.nn.Module):
         self.dense = torch.nn.Linear(hidden_dims[-1], hidden_dims[-1])
 
         # Define the output layer
-        self.fc_mu = torch.nn.Linear(hidden_dims[-1], 1)
+        self.fc_mu = torch.nn.Linear(hidden_dims[-1], 2)
 
     def forward(self, data):
         x, edge_index = data.x, data.edge_index
@@ -62,18 +62,14 @@ class GCNNet_mse(torch.nn.Module):
 
 # Function to calculate mean and std of 'y'
 def calculate_mean_std(loader):
-    HS_values = []
-    LS_values = []
+    y_values = []
     for batch in loader:
-        HS_values.append(batch['HS_E_red'])
-        LS_values.append(batch['LS_E_red'])
-    HS_values = torch.cat(HS_values, dim=0)
-    LS_values = torch.cat(LS_values, dim=0)
-    HS_mean = HS_values.mean(dim=0)
-    LS_mean = LS_values.mean(dim=0)
-    HS_std = HS_values.std(dim=0)
-    LS_std = LS_values.std(dim=0)
-    return HS_mean, HS_std, LS_mean, LS_std
+        y_values.append(batch.y)
+    y_values = torch.cat(y_values, dim=0)
+    print(y_values.shape)
+    mean = y_values.mean(dim=0)
+    std = y_values.std(dim=0)
+    return mean, std
 
 # Create the loss function
 # loss_fn = torch.nn.GaussianNLLLoss()
@@ -95,7 +91,9 @@ def load_all_graphs(folder_path):
 
 all_graphs = load_all_graphs('/Users/victorsu-ortiz/Desktop/Fe-Boryl_complexes/data/torch_processed')
 for graph in all_graphs:
-    graph.y = torch.tensor(graph['HS_E_red'])  # Set HS_E_red as the target and convert it to a tensor
+    HS_E_red = torch.tensor(graph['HS_E_red'].reshape(-1, 1))
+    LS_E_red = torch.tensor(graph['LS_E_red'].reshape(-1, 1))
+    graph.y = torch.cat((HS_E_red, LS_E_red), dim=1)
 
 # Define the number of features for the nodes
 num_node_features = 4
@@ -129,7 +127,7 @@ def run_gcn_mse(hp):
     val_loader = DataLoader(val_data, batch_size=hp['batch_size'], shuffle=False)
     test_loader = DataLoader(test_data, batch_size=hp['batch_size'], shuffle=False)
 
-    HS_mean, HS_std, LS_mean, LS_std = calculate_mean_std(train_loader)
+    mean, std = calculate_mean_std(train_loader)
 
     # Create the model and move it to the device
     model = GCNNet_mse(
@@ -155,14 +153,11 @@ def run_gcn_mse(hp):
             optimizer.zero_grad()
             output = model(batch)
             if(hp['z-normalize']):
-                if(hp['average_outputs']):
-                    loss = loss_fn(output,((batch['HS_E_red'].float()-HS_mean)/HS_std+(batch['LS_E_red'].float()-LS_mean)/LS_std)/2)
-                else:
-                    loss = loss_fn(output, (batch['HS_E_red'].float()-HS_mean)/HS_std)
+                actual_output = (batch.y.float()-mean)/std
+                loss = loss_fn(output,actual_output.float())
             else:
+                print(output.shape)
                 loss = loss_fn(output, batch['HS_E_red'].float())
-            # mu, std = model(batch)
-            # loss = loss_fn(mu, batch.y, std)
             loss.backward()
             optimizer.step()
 
@@ -172,14 +167,10 @@ def run_gcn_mse(hp):
             for batch in val_loader:
                 batch = batch.to(device)
                 output = model(batch)
-                # mu, std = model(batch)
-                # val_loss += loss_fn(mu, batch.y, std).item()
                 if(hp['z-normalize']):
-                    if(hp['average_outputs']):
-                        val_loss = loss_fn(output,((batch['HS_E_red'].float()-HS_mean)/HS_std+(batch['LS_E_red'].float()-LS_mean)/LS_std)/2)
-                    else:
-                        val_loss = loss_fn(output, (batch['HS_E_red'].float()-HS_mean)/HS_std)
-                    # val_loss += loss_fn(output, (batch['HS_E_red'].float()-HS_mean)/HS_std).item()
+                    actual_output = (batch.y.float()-mean)/std
+                    val_loss = loss_fn(output,actual_output.float()).item()
+                        # val_loss = loss_fn(output, (batch['HS_E_red'].float()-HS_mean)/HS_std)
                 else:
                     val_loss += loss_fn(output, batch['HS_E_red'].float()).item()
             val_loss /= len(val_loader)
@@ -230,9 +221,9 @@ if __name__ == "__main__":
         'epochs': 200,
         'use_batch_norm': True,
         'z-normalize': True,
-        'average_outputs': True
     }
 
     run_gcn_mse(hp)
+
 
 
