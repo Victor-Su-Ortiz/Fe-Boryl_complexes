@@ -155,7 +155,10 @@ def run_gcn_mse(hp):
             optimizer.zero_grad()
             output = model(batch)
             if(hp['z-normalize']):
-                loss = loss_fn(output, (batch['HS_E_red'].float()-HS_mean)/HS_std)
+                if(hp['average_outputs']):
+                    loss = loss_fn(output,((batch['HS_E_red'].float()-HS_mean)/HS_std+(batch['LS_E_red'].float()-LS_mean)/LS_std)/2)
+                else:
+                    loss = loss_fn(output, (batch['HS_E_red'].float()-HS_mean)/HS_std)
             else:
                 loss = loss_fn(output, batch['HS_E_red'].float())
             # mu, std = model(batch)
@@ -172,7 +175,11 @@ def run_gcn_mse(hp):
                 # mu, std = model(batch)
                 # val_loss += loss_fn(mu, batch.y, std).item()
                 if(hp['z-normalize']):
-                    val_loss += loss_fn(output, (batch['HS_E_red'].float()-HS_mean)/HS_std).item()
+                    if(hp['average_outputs']):
+                        val_loss = loss_fn(output,((batch['HS_E_red'].float()-HS_mean)/HS_std+(batch['LS_E_red'].float()-LS_mean)/LS_std)/2)
+                    else:
+                        val_loss = loss_fn(output, (batch['HS_E_red'].float()-HS_mean)/HS_std)
+                    # val_loss += loss_fn(output, (batch['HS_E_red'].float()-HS_mean)/HS_std).item()
                 else:
                     val_loss += loss_fn(output, batch['HS_E_red'].float()).item()
             val_loss /= len(val_loader)
@@ -222,7 +229,8 @@ if __name__ == "__main__":
         'lr': 0.00005,
         'epochs': 200,
         'use_batch_norm': True,
-        'z-normalize': True
+        'z-normalize': True,
+        'average_outputs': True
     }
 
     run_gcn_mse(hp)
