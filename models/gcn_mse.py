@@ -167,6 +167,8 @@ def run_gcn_mse(hp):
             optimizer.step()
 
         model.eval()
+        actual_outputs = []
+        predictions = []
         with torch.no_grad():
             val_loss = 0
             for batch in val_loader:
@@ -175,11 +177,14 @@ def run_gcn_mse(hp):
                 if(hp['z-normalize']):
                     actual_output = (batch.y.float()-mean)/std
                     val_loss += loss_fn(output,actual_output.float()).item()
-                    model.metric.update(actual_output.float(),output)
-                    r2Socre.append(model.metric.compute())
+                    predictions.append(output)
+                    actual_outputs.append(actual_output)
                 else:
                     val_loss = loss_fn(output, batch['HS_E_red'].float()).item()
             val_loss /= len(val_loader)
+        
+        model.metric.update(torch.cat(predictions), torch.cat(actual_outputs))
+        r2Socre.append(model.metric.compute().item())
         print(f'Epoch {epoch+1} of job {job_id}, Validation Loss: {val_loss:.7f}')
         print(f'Epoch {epoch+1} of job {job_id}, R2 Score: {r2Socre[-1]}')
 
