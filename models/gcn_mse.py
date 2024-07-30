@@ -6,7 +6,7 @@ import torch.optim as optim
 from torch.utils.data.dataset import random_split
 from torch_geometric.nn import GraphConv, global_mean_pool
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('mps' if torch.cuda.is_available() else 'cpu')
 
 class GCNNet_mse(torch.nn.Module):
     def __init__(self, num_node_features, hp):
@@ -15,7 +15,6 @@ class GCNNet_mse(torch.nn.Module):
         self.use_batch_norm = hp['use_batch_norm']
         self.convs = torch.nn.ModuleList()
         self.batch_norms = torch.nn.ModuleList() if self.use_batch_norm else None
-
         hidden_dims = [hp[f'hidden_dim{i+1}'] for i in range(6)]
         num_layers = [hp[f'num_layers{i+1}'] for i in range(6)]
 
@@ -37,7 +36,7 @@ class GCNNet_mse(torch.nn.Module):
         self.dense = torch.nn.Linear(hidden_dims[-1], hidden_dims[-1])
 
         # Define the output layer
-        self.fc_mu = torch.nn.Linear(hidden_dims[-1], 2)
+        self.fc_mu = torch.nn.Linear(hidden_dims[-1], 1)
 
     def forward(self, data):
         x, edge_index = data.x, data.edge_index
@@ -61,7 +60,20 @@ class GCNNet_mse(torch.nn.Module):
 
         return mu
 
-
+# Function to calculate mean and std of 'y'
+def calculate_mean_std(loader):
+    HS_values = []
+    LS_values = []
+    for batch in loader:
+        HS_values.append(batch['HS_E_red'])
+        LS_values.append(batch['LS_E_red'])
+    HS_values = torch.cat(HS_values, dim=0)
+    LS_values = torch.cat(LS_values, dim=0)
+    HS_mean = HS_values.mean(dim=0)
+    LS_mean = LS_values.mean(dim=0)
+    HS_std = HS_values.std(dim=0)
+    LS_std = LS_values.std(dim=0)
+    return HS_mean, HS_std, LS_mean, LS_std
 
 # Create the loss function
 # loss_fn = torch.nn.GaussianNLLLoss()
@@ -81,24 +93,14 @@ def load_all_graphs(folder_path):
 
     return all_graphs
 
-all_graphs = load_all_graphs('./data/torch_processed/')
-
-# Assuming all_graphs is a list of Data objects
+all_graphs = load_all_graphs('/Users/victorsu-ortiz/Desktop/Fe-Boryl_complexes/data/torch_processed')
 for graph in all_graphs:
-    graph.y = torch.tensor([graph['HS_E_red'], graph['LS_E_red']])
+    graph.y = torch.tensor(graph['HS_E_red'])  # Set HS_E_red as the target and convert it to a tensor
 
 # Define the number of features for the nodes
 num_node_features = 4
 
 def run_gcn_mse(hp):
-    # Create a DataLoader from all_graphs
-    data_loader = DataLoader(all_graphs, batch_size=hp['batch_size'], shuffle=True)
-
-    # Split the data into training_and_val_data and test sets
-    num_graphs = len(all_graphs)
-    num_train_val = int(num_graphs * 0.9)
-    num_test = num_graphs - num_train_val
-    train_and_val_data, test_data = random_split(data_loader.dataset, [num_train_val, num_test])
 
     # Retrieve job_id from hyperparameters, if available
     job_id = hp.get('job_id', 'unknown')
@@ -111,16 +113,23 @@ def run_gcn_mse(hp):
 
     torch.manual_seed(seed)
 
-    # Split the training_and_val_data into training and validation sets
-    num_train_val = len(train_and_val_data)
-    num_train = int(num_train_val * 0.8)
-    num_val = num_train_val - num_train
-    train_data, val_data = random_split(train_and_val_data, [num_train, num_val])
+    data_loader = DataLoader(all_graphs, batch_size=hp['batch_size'], shuffle=True)
+
+    # Calculate the number of samples for each dataset
+    num_graphs = len(all_graphs)
+    num_train = int(num_graphs * 0.7)
+    num_val = int(num_graphs * 0.15)
+    num_test = num_graphs - num_train - num_val  # Ensure the remaining data goes to the test set
+
+    # Split the dataset
+    train_data, val_data, test_data = random_split(data_loader.dataset, [num_train, num_val, num_test])
 
     # Create DataLoaders for each dataset
     train_loader = DataLoader(train_data, batch_size=hp['batch_size'], shuffle=True)
     val_loader = DataLoader(val_data, batch_size=hp['batch_size'], shuffle=False)
     test_loader = DataLoader(test_data, batch_size=hp['batch_size'], shuffle=False)
+
+    HS_mean, HS_std, LS_mean, LS_std = calculate_mean_std(train_loader)
 
     # Create the model and move it to the device
     model = GCNNet_mse(
@@ -145,7 +154,10 @@ def run_gcn_mse(hp):
             batch = batch.to(device)
             optimizer.zero_grad()
             output = model(batch)
-            loss = loss_fn(output, batch.y.float())
+            if(hp['z-normalize']):
+                loss = loss_fn(output, (batch['HS_E_red'].float()-HS_mean)/HS_std)
+            else:
+                loss = loss_fn(output, batch['HS_E_red'].float())
             # mu, std = model(batch)
             # loss = loss_fn(mu, batch.y, std)
             loss.backward()
@@ -159,7 +171,10 @@ def run_gcn_mse(hp):
                 output = model(batch)
                 # mu, std = model(batch)
                 # val_loss += loss_fn(mu, batch.y, std).item()
-                val_loss += loss_fn(output, batch.y.float()).item()
+                if(hp['z-normalize']):
+                    val_loss += loss_fn(output, (batch['HS_E_red'].float()-HS_mean)/HS_std).item()
+                else:
+                    val_loss += loss_fn(output, batch['HS_E_red'].float()).item()
             val_loss /= len(val_loader)
         print(f'Epoch {epoch+1} of job {job_id}, Validation Loss: {val_loss:.7f}')
 
@@ -206,7 +221,8 @@ if __name__ == "__main__":
         'num_layers6': 2,
         'lr': 0.00005,
         'epochs': 200,
-        'use_batch_norm': True
+        'use_batch_norm': True,
+        'z-normalize': True
     }
 
     run_gcn_mse(hp)
