@@ -5,6 +5,7 @@ from torch_geometric.loader import DataLoader
 import torch.optim as optim
 from torch.utils.data.dataset import random_split
 from torch_geometric.nn import GraphConv, global_mean_pool
+from torcheval.metrics import R2Score
 
 device = torch.device('mps' if torch.cuda.is_available() else 'cpu')
 
@@ -15,6 +16,7 @@ class GCNNet_mse(torch.nn.Module):
         self.use_batch_norm = hp['use_batch_norm']
         self.convs = torch.nn.ModuleList()
         self.batch_norms = torch.nn.ModuleList() if self.use_batch_norm else None
+        self.metric = R2Score()
         hidden_dims = [hp[f'hidden_dim{i+1}'] for i in range(6)]
         num_layers = [hp[f'num_layers{i+1}'] for i in range(6)]
 
@@ -139,6 +141,9 @@ def run_gcn_mse(hp):
     # Create a list to store validation losses
     val_losses = []
 
+    # Create a list to store R2 score
+    r2Socre = []
+
     # Create the optimizer
     optimizer = optim.Adam(model.parameters(), lr=hp['lr'])
 
@@ -169,12 +174,14 @@ def run_gcn_mse(hp):
                 output = model(batch)
                 if(hp['z-normalize']):
                     actual_output = (batch.y.float()-mean)/std
-                    val_loss = loss_fn(output,actual_output.float()).item()
-                        # val_loss = loss_fn(output, (batch['HS_E_red'].float()-HS_mean)/HS_std)
+                    val_loss += loss_fn(output,actual_output.float()).item()
+                    model.metric.update(actual_output.float(),output)
+                    r2Socre.append(model.metric.compute())
                 else:
-                    val_loss += loss_fn(output, batch['HS_E_red'].float()).item()
+                    val_loss = loss_fn(output, batch['HS_E_red'].float()).item()
             val_loss /= len(val_loader)
         print(f'Epoch {epoch+1} of job {job_id}, Validation Loss: {val_loss:.7f}')
+        print(f'Epoch {epoch+1} of job {job_id}, R2 Score: {r2Socre[-1]}')
 
         # Step the scheduler
         scheduler.step(val_loss)
@@ -188,6 +195,12 @@ def run_gcn_mse(hp):
         writer = csv.writer(f)
         writer.writerow(['Epoch', 'Validation Loss'])
         writer.writerows(val_losses)
+
+    os.makedirs(f'./r2_score/gcn_noxyz', exist_ok=True)
+    with open(f'./r2_score/gcn_noxyz/r2_score_{job_id}.csv', 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['Epoch', 'R2 Score'])
+        writer.writerows(r2Socre)
 
     # # Save the model
     # model_save_dir = 'saved_retrained_ensemble_exp12_gcn_mse_noxyz'
