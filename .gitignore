@@ -1,2 +1,3 @@
 .venv
 feboryl/
+__pycache__/
