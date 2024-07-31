@@ -1,5 +1,5 @@
 calls:
-- max_evals: 25
+- max_evals: 50
   timeout: null
 search:
   acq_func: UCBd
@@ -153,6 +153,14 @@ search:
       default_value: true
       meta: null
       name: use_batch_norm
+      type: categorical
+      weights: null
+    - choices:
+      - true
+      - false
+      default_value: true
+      meta: null
+      name: z-normalize
       type: categorical
       weights: null
     name: null

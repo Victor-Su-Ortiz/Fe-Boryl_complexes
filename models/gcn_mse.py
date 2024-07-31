@@ -8,7 +8,15 @@ from torch_geometric.nn import GraphConv, global_mean_pool
 from torcheval.metrics import R2Score
 from matplotlib import pyplot as plt
 
-device = torch.device('mps' if torch.cuda.is_available() else 'cpu')
+if torch.backends.mps.is_available():
+    print("Using MPS")
+    if torch.backends.mps.is_built():
+        print("MPS is built")
+else:
+    print("Not using MPS")
+
+# device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+device = torch.device('cpu')
 
 class GCNNet_mse(torch.nn.Module):
     def __init__(self, num_node_features, hp):
@@ -181,8 +189,10 @@ def run_gcn_mse(hp):
                     predictions.append(output)
                     actual_outputs.append(actual_output)
                 else:
-                    val_loss = loss_fn(output, batch.y.float()).item()
+                    val_loss += loss_fn(output, batch.y.float()).item()
             val_loss /= len(val_loader)
+        
+        
         
         val_outputs = torch.cat(actual_outputs)
         val_predictions = torch.cat(predictions)
@@ -205,9 +215,6 @@ def run_gcn_mse(hp):
         writer = csv.writer(f)
         writer.writerow(['Epoch', 'Validation Loss'])
         writer.writerows(val_losses)
-    
-    print(type(r2Score))
-    print(type(val_losses))
 
     os.makedirs(f'./r2_score/gcn_noxyz', exist_ok=True)
     with open(f'./r2_score/gcn_noxyz/r2_score_{job_id}.csv', 'w', newline='') as f:
@@ -253,7 +260,7 @@ if __name__ == "__main__":
         'num_layers5': 2,
         'num_layers6': 2,
         'lr': 0.00005,
-        'epochs': 10,
+        'epochs': 200,
         'use_batch_norm': True,
         'z-normalize': True,
     }

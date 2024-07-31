@@ -9,7 +9,14 @@ from torch_geometric.nn import GATConv, global_mean_pool
 
 
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+
+if torch.backends.mps.is_available():
+    print("Using MPS")
+    if torch.backends.mps.is_built():
+        print("MPS is built")
+else:
+    print("Not using MPS")
 
 
 class GATNet_mse(torch.nn.Module):

@@ -31,6 +31,7 @@ hp.add_hyperparameter((1, 2), "num_layers5")
 hp.add_hyperparameter((1, 2), "num_layers6")
 hp.add_hyperparameter((1e-5, 1e-3, "log-uniform"), "lr")
 hp.add_hyperparameter([200], "epochs")
+hp.add_hyperparameter([True, False], "z-normalize")
 
 # Evaluator creation
 print("Creation of the Evaluator...")
@@ -56,6 +57,6 @@ search = CBO(
     evaluator,
 )
 
-results = search.search(max_evals=25)
+results = search.search(max_evals=50)
 
 print(results)

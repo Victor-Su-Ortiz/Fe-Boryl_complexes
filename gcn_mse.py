@@ -5,8 +5,12 @@ from torch_geometric.loader import DataLoader
 import torch.optim as optim
 from torch.utils.data.dataset import random_split
 from torch_geometric.nn import GraphConv, global_mean_pool
+from torcheval.metrics import R2Score
+from matplotlib import pyplot as plt
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+device = torch.device('cpu')
 
 class GCNNet_mse(torch.nn.Module):
     def __init__(self, num_node_features, hp):
@@ -15,7 +19,7 @@ class GCNNet_mse(torch.nn.Module):
         self.use_batch_norm = hp['use_batch_norm']
         self.convs = torch.nn.ModuleList()
         self.batch_norms = torch.nn.ModuleList() if self.use_batch_norm else None
-
+        self.metric = R2Score()
         hidden_dims = [hp[f'hidden_dim{i+1}'] for i in range(6)]
         num_layers = [hp[f'num_layers{i+1}'] for i in range(6)]
 
@@ -37,7 +41,7 @@ class GCNNet_mse(torch.nn.Module):
         self.dense = torch.nn.Linear(hidden_dims[-1], hidden_dims[-1])
 
         # Define the output layer
-        self.fc_mu = torch.nn.Linear(hidden_dims[-1], 1)
+        self.fc_mu = torch.nn.Linear(hidden_dims[-1], 2)
 
     def forward(self, data):
         x, edge_index = data.x, data.edge_index
@@ -61,7 +65,15 @@ class GCNNet_mse(torch.nn.Module):
 
         return mu
 
-
+# Function to calculate mean and std of 'y'
+def calculate_mean_std(loader):
+    y_values = []
+    for batch in loader:
+        y_values.append(batch.y)
+    y_values = torch.cat(y_values, dim=0)
+    mean = y_values.mean(dim=0)
+    std = y_values.std(dim=0)
+    return mean, std
 
 # Create the loss function
 # loss_fn = torch.nn.GaussianNLLLoss()
@@ -81,26 +93,16 @@ def load_all_graphs(folder_path):
 
     return all_graphs
 
-all_graphs = load_all_graphs('./data/torch_processed/')
-
-# Assuming all_graphs is a list of Data objects
+all_graphs = load_all_graphs('/Users/victorsu-ortiz/Desktop/Fe-Boryl_complexes/data/torch_processed')
 for graph in all_graphs:
-    graph.y = torch.tensor([graph['HS_E_red']])  # Set HS_E_red as the target and convert it to a tensor
+    HS_E_red = torch.tensor(graph['HS_E_red'].reshape(-1, 1))
+    LS_E_red = torch.tensor(graph['LS_E_red'].reshape(-1, 1))
+    graph.y = torch.cat((HS_E_red, LS_E_red), dim=1)
 
 # Define the number of features for the nodes
 num_node_features = 4
 
-
-
 def run_gcn_mse(hp):
-    # Create a DataLoader from all_graphs
-    data_loader = DataLoader(all_graphs, batch_size=hp['batch_size'], shuffle=True)
-
-    # Split the data into training_and_val_data and test sets
-    num_graphs = len(all_graphs)
-    num_train_val = int(num_graphs * 0.9)
-    num_test = num_graphs - num_train_val
-    train_and_val_data, test_data = random_split(data_loader.dataset, [num_train_val, num_test])
 
     # Retrieve job_id from hyperparameters, if available
     job_id = hp.get('job_id', 'unknown')
@@ -113,16 +115,23 @@ def run_gcn_mse(hp):
 
     torch.manual_seed(seed)
 
-    # Split the training_and_val_data into training and validation sets
-    num_train_val = len(train_and_val_data)
-    num_train = int(num_train_val * 0.8)
-    num_val = num_train_val - num_train
-    train_data, val_data = random_split(train_and_val_data, [num_train, num_val])
+    data_loader = DataLoader(all_graphs, batch_size=hp['batch_size'], shuffle=True)
+
+    # Calculate the number of samples for each dataset
+    num_graphs = len(all_graphs)
+    num_train = int(num_graphs * 0.7)
+    num_val = int(num_graphs * 0.15)
+    num_test = num_graphs - num_train - num_val  # Ensure the remaining data goes to the test set
+
+    # Split the dataset
+    train_data, val_data, test_data = random_split(data_loader.dataset, [num_train, num_val, num_test])
 
     # Create DataLoaders for each dataset
     train_loader = DataLoader(train_data, batch_size=hp['batch_size'], shuffle=True)
     val_loader = DataLoader(val_data, batch_size=hp['batch_size'], shuffle=False)
     test_loader = DataLoader(test_data, batch_size=hp['batch_size'], shuffle=False)
+
+    mean, std = calculate_mean_std(train_loader)
 
     # Create the model and move it to the device
     model = GCNNet_mse(
@@ -133,6 +142,9 @@ def run_gcn_mse(hp):
 
     # Create a list to store validation losses
     val_losses = []
+
+    # Create a list to store R2 score
+    r2Score = []
 
     # Create the optimizer
     optimizer = optim.Adam(model.parameters(), lr=hp['lr'])
@@ -147,29 +159,49 @@ def run_gcn_mse(hp):
             batch = batch.to(device)
             optimizer.zero_grad()
             output = model(batch)
-            loss = loss_fn(output, batch.y.float())
-            # mu, std = model(batch)
-            # loss = loss_fn(mu, batch.y, std)
+            if(hp['z-normalize']):
+                actual_output = (batch.y.float()-mean)/std
+                loss = loss_fn(output,actual_output.float())
+            else:
+                loss = loss_fn(output, batch.y.float())
             loss.backward()
             optimizer.step()
 
         model.eval()
+        actual_outputs = []
+        predictions = []
         with torch.no_grad():
             val_loss = 0
             for batch in val_loader:
                 batch = batch.to(device)
                 output = model(batch)
-                # mu, std = model(batch)
-                # val_loss += loss_fn(mu, batch.y, std).item()
-                val_loss += loss_fn(output, batch.y.float()).item()
+                if(hp['z-normalize']):
+                    actual_output = (batch.y.float()-mean)/std
+                    val_loss += loss_fn(output,actual_output.float()).item()
+                    predictions.append(output)
+                    actual_outputs.append(actual_output)
+                else:
+                    val_loss += loss_fn(output, batch.y.float()).item()
+                    predictions.append(output)
+                    actual_outputs.append(batch.y.float())
             val_loss /= len(val_loader)
+        
+        
+        
+        val_outputs = torch.cat(actual_outputs)
+        val_predictions = torch.cat(predictions)
+        model.metric.update(val_predictions, val_outputs)
+        r2score = model.metric.compute().item()
+        
         print(f'Epoch {epoch+1} of job {job_id}, Validation Loss: {val_loss:.7f}')
+        print(f'Epoch {epoch+1} of job {job_id}, R2 Score: {r2score:.7f}')
 
         # Step the scheduler
         scheduler.step(val_loss)
 
         # Append the epoch and validation loss to the list
         val_losses.append([epoch+1, val_loss])
+        r2Score.append([epoch+1, r2score])
 
     # Save validation losses to a CSV file
     os.makedirs(f'./val_losses/gcn_noxyz', exist_ok=True)
@@ -178,6 +210,21 @@ def run_gcn_mse(hp):
         writer.writerow(['Epoch', 'Validation Loss'])
         writer.writerows(val_losses)
 
+    os.makedirs(f'./r2_score/gcn_noxyz', exist_ok=True)
+    with open(f'./r2_score/gcn_noxyz/r2_score_{job_id}.csv', 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['Epoch', 'R2 Score'])
+        writer.writerows(r2Score)
+    
+    # Plotting predicted vs actual values
+    # plt.figure(figsize=(8, 6))
+    # plt.scatter(val_outputs.numpy(), val_predictions.numpy(), alpha=0.5)
+    # plt.plot([val_outputs.min(), val_outputs.max()], [val_outputs.min(), val_outputs.max()], 'r', lw=2)
+    # plt.xlabel('Actual Values')
+    # plt.ylabel('Predicted Values')
+    # plt.title('Predicted vs Actual Values')
+    # plt.show()
+
     # # Save the model
     # model_save_dir = 'saved_retrained_ensemble_exp12_gcn_mse_noxyz'
     # os.makedirs(model_save_dir, exist_ok=True)
@@ -185,7 +232,7 @@ def run_gcn_mse(hp):
     # torch.save(model.state_dict(), model_save_path)
 
     # Return the negative final validation loss as the metric for hyperparameter tuning
-    return -val_loss    
+    return -val_loss, r2score
 
     # return model
 
@@ -208,9 +255,11 @@ if __name__ == "__main__":
         'num_layers6': 2,
         'lr': 0.00005,
         'epochs': 200,
-        'use_batch_norm': True
+        'use_batch_norm': True,
+        'z-normalize': True,
     }
 
     run_gcn_mse(hp)
+
 
 
