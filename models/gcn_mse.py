@@ -6,6 +6,7 @@ import torch.optim as optim
 from torch.utils.data.dataset import random_split
 from torch_geometric.nn import GraphConv, global_mean_pool
 from torcheval.metrics import R2Score
+from matplotlib import pyplot as plt
 
 device = torch.device('mps' if torch.cuda.is_available() else 'cpu')
 
@@ -142,7 +143,7 @@ def run_gcn_mse(hp):
     val_losses = []
 
     # Create a list to store R2 score
-    r2Socre = []
+    r2Score = []
 
     # Create the optimizer
     optimizer = optim.Adam(model.parameters(), lr=hp['lr'])
@@ -162,7 +163,7 @@ def run_gcn_mse(hp):
                 loss = loss_fn(output,actual_output.float())
             else:
                 print(output.shape)
-                loss = loss_fn(output, batch['HS_E_red'].float())
+                loss = loss_fn(output, batch.y.float())
             loss.backward()
             optimizer.step()
 
@@ -180,19 +181,23 @@ def run_gcn_mse(hp):
                     predictions.append(output)
                     actual_outputs.append(actual_output)
                 else:
-                    val_loss = loss_fn(output, batch['HS_E_red'].float()).item()
+                    val_loss = loss_fn(output, batch.y.float()).item()
             val_loss /= len(val_loader)
         
-        model.metric.update(torch.cat(predictions), torch.cat(actual_outputs))
-        r2Socre.append(model.metric.compute().item())
+        val_outputs = torch.cat(actual_outputs)
+        val_predictions = torch.cat(predictions)
+        model.metric.update(val_predictions, val_outputs)
+        r2score = model.metric.compute().item()
+        
         print(f'Epoch {epoch+1} of job {job_id}, Validation Loss: {val_loss:.7f}')
-        print(f'Epoch {epoch+1} of job {job_id}, R2 Score: {r2Socre[-1]}')
+        print(f'Epoch {epoch+1} of job {job_id}, R2 Score: {r2score:.7f}')
 
         # Step the scheduler
         scheduler.step(val_loss)
 
         # Append the epoch and validation loss to the list
         val_losses.append([epoch+1, val_loss])
+        r2Score.append([epoch+1, r2score])
 
     # Save validation losses to a CSV file
     os.makedirs(f'./val_losses/gcn_noxyz', exist_ok=True)
@@ -200,12 +205,24 @@ def run_gcn_mse(hp):
         writer = csv.writer(f)
         writer.writerow(['Epoch', 'Validation Loss'])
         writer.writerows(val_losses)
+    
+    print(type(r2Score))
+    print(type(val_losses))
 
     os.makedirs(f'./r2_score/gcn_noxyz', exist_ok=True)
     with open(f'./r2_score/gcn_noxyz/r2_score_{job_id}.csv', 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(['Epoch', 'R2 Score'])
-        writer.writerows(r2Socre)
+        writer.writerows(r2Score)
+    
+    # Plotting predicted vs actual values
+    plt.figure(figsize=(8, 6))
+    plt.scatter(val_outputs.numpy(), val_predictions.numpy(), alpha=0.5)
+    plt.plot([val_outputs.min(), val_outputs.max()], [val_outputs.min(), val_outputs.max()], 'r', lw=2)
+    plt.xlabel('Actual Values')
+    plt.ylabel('Predicted Values')
+    plt.title('Predicted vs Actual Values')
+    plt.show()
 
     # # Save the model
     # model_save_dir = 'saved_retrained_ensemble_exp12_gcn_mse_noxyz'
@@ -214,7 +231,7 @@ def run_gcn_mse(hp):
     # torch.save(model.state_dict(), model_save_path)
 
     # Return the negative final validation loss as the metric for hyperparameter tuning
-    return -val_loss    
+    return -val_loss
 
     # return model
 
@@ -236,7 +253,7 @@ if __name__ == "__main__":
         'num_layers5': 2,
         'num_layers6': 2,
         'lr': 0.00005,
-        'epochs': 200,
+        'epochs': 10,
         'use_batch_norm': True,
         'z-normalize': True,
     }
