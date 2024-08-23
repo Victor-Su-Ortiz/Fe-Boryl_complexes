@@ -1,3 +1,4 @@
 .venv
 feboryl/
 __pycache__/
+models/__pycache__/
