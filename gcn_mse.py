@@ -93,7 +93,7 @@ def load_all_graphs(folder_path):
 
     return all_graphs
 
-all_graphs = load_all_graphs('/Users/victorsu-ortiz/Desktop/Fe-Boryl_complexes/data/torch_processed')
+all_graphs = load_all_graphs('./data/torch_processed')
 for graph in all_graphs:
     HS_E_red = torch.tensor(graph['HS_E_red'].reshape(-1, 1))
     LS_E_red = torch.tensor(graph['LS_E_red'].reshape(-1, 1))
