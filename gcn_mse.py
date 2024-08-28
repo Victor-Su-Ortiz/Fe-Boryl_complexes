@@ -114,7 +114,6 @@ def run_gcn_mse(hp):
         seed = int(job_id) + 2024
 
     torch.manual_seed(seed)
-
     data_loader = DataLoader(all_graphs, batch_size=hp['batch_size'], shuffle=True)
 
     # Calculate the number of samples for each dataset
@@ -186,8 +185,6 @@ def run_gcn_mse(hp):
                     actual_outputs.append(batch.y.float())
             val_loss /= len(val_loader)
         
-        
-        
         val_outputs = torch.cat(actual_outputs)
         val_predictions = torch.cat(predictions)
         model.metric.update(val_predictions, val_outputs)
@@ -232,7 +229,7 @@ def run_gcn_mse(hp):
     # torch.save(model.state_dict(), model_save_path)
 
     # Return the negative final validation loss as the metric for hyperparameter tuning
-    return -val_loss, r2score
+    return -r2score
 
     # return model
 

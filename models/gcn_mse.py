@@ -8,14 +8,7 @@ from torch_geometric.nn import GraphConv, global_mean_pool
 from torcheval.metrics import R2Score
 from matplotlib import pyplot as plt
 
-if torch.backends.mps.is_available():
-    print("Using MPS")
-    if torch.backends.mps.is_built():
-        print("MPS is built")
-else:
-    print("Not using MPS")
-
-# device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+# device = torch.device('mps' if torch.backends.mps.is_available() else 'cuda' if torch.cuda.is_available() else 'cpu')
 device = torch.device('cpu')
 
 class GCNNet_mse(torch.nn.Module):
@@ -163,7 +156,9 @@ def run_gcn_mse(hp):
     for epoch in range(hp['epochs']):
         model.train()
         for batch in train_loader:
-            batch = batch.to(device)
+            # batch = batch.to(torch.float32)
+            batch = batch.to(device)    
+            # batch = batch.to(device=device, dtype=torch.float32)
             optimizer.zero_grad()
             output = model(batch)
             if(hp['z-normalize']):
